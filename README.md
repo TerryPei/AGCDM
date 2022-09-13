@@ -1,5 +1,5 @@
 ## Introduction For AGCDM 
-
+![LICENSE](https://img.shields.io/github/license/TerryPei/AGCDM)
 ### 1. Brief Introduction
 This repository contains AGCDM (Attention Gate Mechnism for Cognitive Diagnosis) based code recommendation models implemented by PyTorch on the Linux, which can generate item response predictions for skills proficiency on latent ability level.
 
