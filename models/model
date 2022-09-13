@@ -1,0 +1,155 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import random
+import torch.utils.data as Data
+import seaborn as sns
+
+class AttentionLayer(nn.Module):
+    
+    def __init__(self, student_n, item_n, knowledge_n, knowledge_embed_size, n_heads=8):
+        
+        super(AttentionLayer, self).__init__()
+        
+        self.student_n = student_n
+        self.item_n = item_n
+        self.knowledge_n = knowledge_n
+        self.knowledge_embed_size = knowledge_embed_size
+        self.n_heads = n_heads
+        self.d_model = self.knowledge_embed_size
+        
+        self.emb_stu = nn.Embedding(student_n, knowledge_embed_size) # Q
+        self.emb_item = nn.Embedding(item_n, knowledge_embed_size) # K
+        self.emb_knowledge = nn.Linear(knowledge_n, knowledge_embed_size) # V
+        
+        self.W_stu_knowledge = nn.Linear(self.d_model, knowledge_embed_size * self.n_heads, bias=False)
+        
+        self.W_item_knowledge = nn.Linear(self.d_model, knowledge_embed_size * self.n_heads, bias=False)
+        
+        self.W_skill_knowledge = nn.Linear(self.d_model, knowledge_embed_size * self.n_heads, bias=False)
+        
+#         self.similar = nn.CosineSimilarity(dim=0, eps=1e-6)
+                
+        self.softmax = nn.Softmax(dim=0)
+        
+        self.drop = nn.Dropout(p=0.5)
+        
+                # initialization
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.xavier_normal_(param)
+        
+    def forward(self, batch_stu_id, batch_item_id, batch_knowledge_id):
+        
+        # three embedding representation in paper: [batch_size, knowledge_embed_size * n_heads]
+        embed_stu = torch.sigmoid(self.emb_stu(batch_stu_id))   
+        embed_item = torch.sigmoid(self.emb_item(batch_item_id))     
+        embed_knowledge = torch.sigmoid(self.emb_knowledge(batch_knowledge_id)) 
+        
+        # three relation attention in paper: [batch_size, knowledge_embed_size * n_heads]
+        stu_knowledge_attention = self.W_stu_knowledge(embed_stu)
+        item_knowledge_attention = self.W_item_knowledge(embed_item)
+        skill_knowledge_attention = self.W_skill_knowledge(embed_knowledge)
+        
+        
+        attention_score = (stu_knowledge_attention * item_knowledge_attention) / np.sqrt(self.knowledge_embed_size)\
+                          * skill_knowledge_attention
+        
+        return attention_score
+
+
+class ACDM(nn.Module):
+    
+    def __init__(self, student_n, item_n, knowledge_n, knowledge_embed_size, n_heads=8):
+        
+        super(ACDM, self).__init__()
+        
+        self.student_n = student_n
+        self.item_n = item_n
+        self.knowledge_n = knowledge_n
+        self.knowledge_embed_size = knowledge_embed_size
+        self.n_heads = n_heads
+        
+        self.muti_attention = AttentionLayer(student_n, item_n, knowledge_n, knowledge_embed_size)
+        
+        self.similar = nn.CosineSimilarity(dim=0, eps=1e-6)
+        self.softmax = nn.Softmax(dim=0)
+        
+        self.linear1 = nn.Linear(self.knowledge_embed_size * self.n_heads, 512)
+        self.linear2 = nn.Linear(512, 256)
+        self.linear3 = nn.Linear(256, 1)
+        
+        self.drop = nn.Dropout(p=0.5)
+        
+                # initialization
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.xavier_normal_(param)
+        
+    def forward(self, batch_stu_id, batch_item_id, batch_knowledge_id, knowledge_n):
+        
+        attention_score = self.muti_attention(batch_stu_id, batch_item_id, batch_knowledge_id)
+        # [batch_size, ]
+        hidden1 = self.drop(torch.sigmoid(self.linear1(attention_score))) 
+        hidden2 = self.drop(torch.sigmoid(self.linear2(hidden1))) 
+        out = torch.sigmoid(self.linear3(hidden2))
+        out = out
+        
+        return out
+    
+
+
+class GateLayer(nn.Module):
+    def __init__(self, feature_size, num_layers, f=torch.relu):
+
+        super(GateLayer, self).__init__()
+
+        self.num_layers = num_layers
+
+        self.guess = nn.ModuleList([nn.Linear(feature_size, feature_size) for _ in range(num_layers)])
+
+        self.slip = nn.ModuleList([nn.Linear(feature_size, feature_size) for _ in range(num_layers)])
+
+        self.pass_func = nn.ModuleList([nn.Linear(feature_size, feature_size) for _ in range(num_layers)])
+
+        self.nopass_func = nn.ModuleList([nn.Linear(feature_size, feature_size) for _ in range(num_layers)])
+
+        self.f = f
+        
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.xavier_normal_(param)
+        
+
+    def forward(self, x):
+      
+        for layer in range(self.num_layers):
+            guess_prob = torch.sigmoid(self.guess[layer](x))
+            slip_prob = torch.sigmoid(self.slip[layer](x))
+            gate = guess_prob + slip_prob
+
+            pass_results = self.f(self.pass_func[layer](x)) # f only functinoal on the pass
+            no_pass_results = self.nopass_func[layer](x)
+
+            x = pass_results + gate * no_pass_results
+
+        return x
+
+class AGCDM(nn.Module):
+    def __init__(self, student_n, item_n, knowledge_n, knowledge_embed_size, n_heads=8):
+        super(AGCDM, self).__init__()
+        
+        self.n_heads = n_heads
+        self.attention = AttentionLayer(student_n, item_n, knowledge_n, knowledge_embed_size)
+        self.gate = GateLayer(knowledge_embed_size * self.n_heads, 1, torch.sigmoid)
+        
+        self.linear = nn.Linear(knowledge_embed_size * self.n_heads, 1)
+        
+    def forward(self, batch_stu_id, batch_item_id, batch_knowledge_id):
+        
+        attention_score = self.attention(batch_stu_id, batch_item_id, batch_knowledge_id)
+        gate_score = self.gate(attention_score)
+        score = self.linear(gate_score)
+
+        return score
