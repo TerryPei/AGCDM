@@ -1,5 +1,5 @@
 # Introduction For AGCDM 
-#### Code implementation of Accepted Paper: Attention Gate Mechnism for Cognitive Diagnosis.
+#### Code implementation of our Accepted Paper: Attention Gate Mechanism for Cognitive Diagnosis.
 
 ![LICENSE](https://img.shields.io/github/license/TerryPei/AGCDM)
 ![VERSION](https://img.shields.io/badge/version-v1.01-blue)
